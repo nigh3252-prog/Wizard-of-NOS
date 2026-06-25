@@ -1,0 +1,53 @@
+name: Asset split smoke test
+
+on:
+  push:
+    branches:
+      - asset-split-preview
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Run asset split smoke test')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: asset-split-preview
+
+      - name: Verify split file layout
+        run: |
+          set -euxo pipefail
+          test -f index.html
+          test -f styles/wizard.css
+          test -f planner/tetromino-planner.html
+          test ! -f wizard.css
+          test ! -f tetromino-planner.html
+          grep -q 'styles/wizard.css' index.html
+          grep -q 'planner/tetromino-planner.html' index.html
+          if grep -q 'PASS5_TETROMINO_HTML_B64' index.html; then
+            echo 'Embedded planner base64 payload is still present in index.html.' >&2
+            exit 1
+          fi
+
+      - name: Syntax-check extracted scripts
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import pathlib, re
+          for source in ['index.html', 'planner/tetromino-planner.html']:
+              text = pathlib.Path(source).read_text(encoding='utf-8')
+              scripts = re.findall(r'<script[^>]*>([\s\S]*?)</script>', text, flags=re.I)
+              out_dir = pathlib.Path('/tmp/wizard-script-check') / source.replace('/', '_')
+              out_dir.mkdir(parents=True, exist_ok=True)
+              for i, script in enumerate(scripts):
+                  script = script.strip()
+                  if not script:
+                      continue
+                  (out_dir / f'script_{i}.js').write_text(script, encoding='utf-8')
+          PY
+          find /tmp/wizard-script-check -name '*.js' -print0 | xargs -0 -n1 node --check
