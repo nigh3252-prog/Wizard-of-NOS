@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Wizard of NOS - Hosted Config Split Preview</title>
+<style>
+  html,body{margin:0;min-height:100%;background:#10131b;color:#f5ecd8;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .previewBoot{min-height:100vh;display:grid;place-items:center;padding:18px;box-sizing:border-box;background:radial-gradient(circle at top,rgba(48,56,74,.96),rgba(12,15,22,.98) 58%,rgba(7,9,13,.99))}
+  .previewCard{width:min(560px,calc(100vw - 32px));border-radius:22px;border:1px solid rgba(245,236,216,.18);background:rgba(20,26,36,.92);box-shadow:0 18px 54px rgba(0,0,0,.50);padding:16px;box-sizing:border-box}
+  .previewTitle{font-size:18px;font-weight:950;letter-spacing:.05em;margin-bottom:8px}
+  .previewText{font-size:13px;line-height:1.45;color:rgba(245,236,216,.72);margin-bottom:10px}
+  #previewLog{display:grid;gap:5px;font:700 11px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:rgba(245,236,216,.82)}
+  #previewLog div{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}
+  #previewLog .bad{color:#ff8a8a;border-color:rgba(255,138,138,.34);background:rgba(90,20,20,.22)}
+</style>
+</head>
+<body>
+<div class="previewBoot">
+  <div class="previewCard">
+    <div class="previewTitle">Wizard hosted-config preview</div>
+    <div class="previewText">This wrapper loads the root game file, injects external default settings from <code>config/default-settings.json</code>, and uses an isolated preview localStorage key so the live game settings are not touched.</div>
+    <div id="previewLog"><div>Starting preview wrapper…</div></div>
+  </div>
+</div>
+<script>
+(async function(){
+  const logEl = document.getElementById('previewLog');
+  const PREVIEW_SETTINGS_KEY = 'mazeDriftSettings_preview_hosted_config_split';
+  const DEFAULT_SETTINGS_PATH = './config/default-settings.json';
+  const ROOT_INDEX_PATH = '../../index.html';
+  function esc(s){return String(s).replace(/[<>&]/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]));}
+  function log(msg, bad){
+    if(!logEl) return;
+    const row = document.createElement('div');
+    if(bad) row.className = 'bad';
+    row.innerHTML = esc(msg);
+    logEl.appendChild(row);
+  }
+  function safeScriptJson(value){
+    return JSON.stringify(value).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
+  }
+  try{
+    const params = new URLSearchParams(location.search);
+    if(params.has('fresh') || params.has('resetPreviewSettings')){
+      localStorage.removeItem(PREVIEW_SETTINGS_KEY);
+      log('Cleared isolated preview settings because ?fresh/resetPreviewSettings was supplied.');
+    }
+
+    log('Fetching root index.html…');
+    const indexResponse = await fetch(ROOT_INDEX_PATH, { cache: 'no-store' });
+    if(!indexResponse.ok) throw new Error('Could not load root index.html: HTTP ' + indexResponse.status);
+
+    log('Fetching external default settings JSON…');
+    const settingsResponse = await fetch(DEFAULT_SETTINGS_PATH, { cache: 'no-store' });
+    if(!settingsResponse.ok) throw new Error('Could not load default settings JSON: HTTP ' + settingsResponse.status);
+
+    let html = await indexResponse.text();
+    const defaultSettings = await settingsResponse.json();
+    log('Fetched game HTML and default-settings.json.');
+
+    const previewLoadSettings = `function loadSettings(){
+  window.__wizardSettingsLoadInProgress=true;
+  window.__wizardSuppressSettingsAutosave=true;
+  try{
+    const raw=localStorage.getItem('mazeDriftSettings');
+    if(raw){
+      applySettings(JSON.parse(raw));
+      try{if(window.__wizardBootProgress)window.__wizardBootProgress.mark('Loaded isolated preview settings from localStorage');}catch(_){ }
+    }else{
+      const defaults=window.__wizardHostedDefaultSettings;
+      if(!defaults)throw new Error('Hosted default settings were not injected before loadSettings()');
+      applySettings(JSON.parse(JSON.stringify(defaults)));
+      try{if(window.__wizardBootProgress)window.__wizardBootProgress.mark('Loaded hosted defaults from config/default-settings.json');}catch(_){ }
+    }
+  }catch(e){
+    console.warn('Wizard preview settings/default load failed',e);
+    try{if(window.__wizardBootProgress)window.__wizardBootProgress.error('Loading hosted defaults / preview localStorage',e);}catch(_){ }
+  }finally{
+    window.__wizardSuppressSettingsAutosave=false;
+    window.__wizardSettingsLoadInProgress=false;
+  }
+  levelType=1;syncLvl();
+  if(typeof restoreMenuState==="function")restoreMenuState();
+}
+`;
+
+    const loadSettingsPattern = /function loadSettings\(\)\{[\s\S]*?\n\}\n\n\/\/ ── Settings panel buttons/;
+    if(!loadSettingsPattern.test(html)) throw new Error('Could not find the expected loadSettings() block to patch.');
+    html = html.replace(loadSettingsPattern, previewLoadSettings + '\n// ── Settings panel buttons');
+
+    html = html.replace(/<title>([^<]*)<\/title>/, '<title>$1 - Hosted Config Preview</title>');
+    html = html.replaceAll('mazeDriftSettings', PREVIEW_SETTINGS_KEY);
+    html = html.replace('<head>', '<head>\n<!-- Hosted config preview: transformed by preview/hosted-config-split/index.html. Root game file is not modified. -->');
+    html = html.replace('<script>', '<script>window.__wizardHostedConfigPreview=true;window.__wizardPreviewSettingsKey='+safeScriptJson(PREVIEW_SETTINGS_KEY)+';window.__wizardHostedDefaultSettings='+safeScriptJson(defaultSettings)+';<\\/script>\n<script>');
+    if(!html.includes('__wizardHostedDefaultSettings')) throw new Error('Default settings injection failed.');
+    if(!html.includes(PREVIEW_SETTINGS_KEY)) throw new Error('Preview localStorage isolation patch failed.');
+
+    log('Patched game boot to use hosted defaults and isolated preview storage.');
+    document.open();
+    document.write(html);
+    document.close();
+  }catch(err){
+    console.error(err);
+    log(err && err.stack ? err.stack : err, true);
+  }
+})();
+</script>
+</body>
+</html>
