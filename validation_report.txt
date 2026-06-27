@@ -1,0 +1,28 @@
+Wizard of NOS Three.js r128 extraction validation
+=======================================================
+Source file: index.html
+Source size: 2,210,263 bytes
+Updated index.html size: 1,606,815 bytes
+vendor/three.r128.min.js size: 603,478 bytes
+Bytes removed from index.html: 603,448 bytes
+
+Checks:
+- Found embedded Three.js r128 marker: True
+- Extracted license present: True
+- Inline Three.js marker removed from index.html: True
+- External script reference count: 1
+- Replacement is exact: True
+- Splice reconstruction equals original file: True
+- Next Wizard script remains immediately after Three reference: True
+
+SHA-256:
+- source index.html: a1d181c5297681d78886ae8b59ca3ff77b009b3eb2b55e7832ba07fff000d2af
+- updated index.html: 43c3c50fee3b02069d4f792e5a412e6b15421c74bc50ad4ca0d3003fe7e97c64
+- vendor/three.r128.min.js: e90f54cdbc0d81d9e3a4f2927548f0cc9e247f05012c59cf3afeda6e04685415
+
+What changed:
+- The original inline <script>/* three.js r128 — embedded */ ... </script> block was removed from index.html.
+- It was replaced at the exact same location with:
+  <script src="vendor/three.r128.min.js"></script>
+- The extracted JavaScript was written to vendor/three.r128.min.js.
+- No intentional gameplay, default-setting, localStorage, boot-order, planner, or CSS edits were made.
