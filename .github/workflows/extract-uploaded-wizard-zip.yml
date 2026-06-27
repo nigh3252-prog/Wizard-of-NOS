@@ -1,0 +1,104 @@
+name: Extract uploaded Wizard zip
+
+on:
+  push:
+    branches:
+      - chore/extract-planner-html
+    paths:
+      - wizard_combined_extraction_pass10_66.zip
+      - .github/workflows/extract-uploaded-wizard-zip.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: chore/extract-planner-html
+          fetch-depth: 0
+
+      - name: Extract selected files from uploaded zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="wizard_combined_extraction_pass10_66.zip"
+          if [ ! -f "$ZIP" ]; then
+            echo "Zip file $ZIP not found. Nothing to extract."
+            exit 0
+          fi
+
+          rm -rf .extract
+          mkdir -p .extract
+
+          python3 - <<'PY'
+          import pathlib
+          import shutil
+          import zipfile
+
+          zip_path = pathlib.Path("wizard_combined_extraction_pass10_66.zip")
+          extract_dir = pathlib.Path(".extract")
+          with zipfile.ZipFile(zip_path) as zf:
+              zf.extractall(extract_dir)
+
+          root = extract_dir / "wizard_combined_extracted"
+          if not root.exists():
+              raise SystemExit("Expected folder wizard_combined_extracted was not found inside the zip.")
+
+          desired_paths = [
+              "index.html",
+              "styles/main.css",
+              "planner/pass5-tetromino-planner.html",
+              "vendor/three.r128.min.js",
+              "data/nos-characters.js",
+              "data/mushroom-field-sprites.js",
+              "assets/mushrooms/mushroom-field-0.png",
+              "assets/mushrooms/mushroom-field-1.png",
+              "assets/mushrooms/mushroom-field-2.png",
+              "ui/mini-planner-hud.js",
+          ]
+
+          for rel in desired_paths:
+              src = root / rel
+              if not src.exists():
+                  raise SystemExit(f"Missing expected extracted file: {rel}")
+              dst = pathlib.Path(rel)
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+
+          zip_path.unlink()
+          PY
+
+          rm -rf .extract
+          git status --short
+
+      - name: Commit extracted files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add index.html \
+                  styles/main.css \
+                  planner/pass5-tetromino-planner.html \
+                  vendor/three.r128.min.js \
+                  data/nos-characters.js \
+                  data/mushroom-field-sprites.js \
+                  assets/mushrooms/mushroom-field-0.png \
+                  assets/mushrooms/mushroom-field-1.png \
+                  assets/mushrooms/mushroom-field-2.png \
+                  ui/mini-planner-hud.js
+          git rm -f wizard_combined_extraction_pass10_66.zip || true
+
+          if git diff --cached --quiet; then
+            echo "No extracted changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Extract planner, CSS, art, and sprite assets"
+          git push
