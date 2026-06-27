@@ -1,0 +1,55 @@
+name: Self patch pause version
+
+on:
+  push:
+    branches:
+      - version-in-pause-menu
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'Show version in pause menu') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: version-in-pause-menu
+          fetch-depth: 0
+      - name: Patch pause menu version label
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('index.html')
+          text = path.read_text(encoding='utf-8')
+
+          if 'id="wizardVersionTag"' not in text:
+              title_match = re.search(r'<title>\s*([^<]*?)\s*</title>', text, re.I)
+              title_text = title_match.group(1) if title_match else ''
+              version_match = re.search(r'Pass\s+([0-9]+(?:\.[0-9]+)*)', title_text, re.I)
+              version_label = f"Pass {version_match.group(1)}" if version_match else 'Version unknown'
+
+              needle = '<div class="panelHeader"><div><div class="panelTitle">WIZARD OF NOS</div></div><button class="iconBtn" id="menuCloseBtn">HIDE</button></div>'
+              replacement = f'<div class="panelHeader"><div><div class="panelTitle">WIZARD OF NOS</div><div id="wizardVersionTag" style="font-size:11px;opacity:.62;margin-top:2px;letter-spacing:.04em">{version_label}</div></div><button class="iconBtn" id="menuCloseBtn">HIDE</button></div>'
+
+              if needle not in text:
+                  raise SystemExit('Pause menu header target not found; refusing to patch index.html')
+
+              text = text.replace(needle, replacement, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit branch-only patch and remove temporary workflow
+        run: |
+          rm -f .github/workflows/pause-version-selfpatch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html .github/workflows/pause-version-selfpatch.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Show version in pause menu"
+          git push origin HEAD:version-in-pause-menu
