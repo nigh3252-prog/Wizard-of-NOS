@@ -1,3 +1,4 @@
+# Triggered helper for extracting the uploaded Wizard package.
 name: Extract uploaded Wizard zip
 
 on:
